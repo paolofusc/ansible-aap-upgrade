@@ -1,0 +1,15 @@
+---
+- name: Gather and display Cisco ASA version
+  hosts: asa_firewalls
+  gather_facts: false
+
+  tasks:
+    - name: Run show version on Cisco ASA
+      cisco.asa.asa_command:
+        commands:
+          - show version
+      register: version_output
+
+    - name: Display show version output
+      ansible.builtin.debug:
+        var: version_output.stdout_lines[0]
