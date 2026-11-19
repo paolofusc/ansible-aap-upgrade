@@ -7,7 +7,7 @@
     target_scp_server: "{{ scp_server | default('10.0.1.10') }}"
     target_scp_user: "{{ scp_user | default('scp') }}"
     target_scp_password: "{{ scp_password | default('scp1234567890') }}"
-    target_scp_dir: "{{ scp_dir | default('') }}"
+    target_scp_dir: "{{ scp_dir | default('backups/') }}"
     asa_source_interface: "{{ asa_interface | default('management') }}"
     perform_full_backup: true
     perform_config_backup: true
