@@ -4,17 +4,32 @@
   gather_facts: false
 
   tasks:
-    - name: Run network and SSH diagnostics on ASA
+    - name: Ping SCP server from ASA management interface
       cisco.asa.asa_command:
         commands:
           - "ping management 10.0.1.10"
-          - "show arp"
-          - "show running-config interface Management0/0"
-          - "show running-config ssh"
-          - "ssh 10.0.1.10"
-      register: diag_output
-      ignore_errors: true
+      register: ping_res
 
-    - name: Display diagnostics
+    - name: Display ping output
       ansible.builtin.debug:
-        var: diag_output.stdout_lines
+        var: ping_res.stdout_lines
+
+    - name: Show ARP table on ASA
+      cisco.asa.asa_command:
+        commands:
+          - "show arp"
+      register: arp_res
+
+    - name: Display ARP table
+      ansible.builtin.debug:
+        var: arp_res.stdout_lines
+
+    - name: Show SSH config on ASA
+      cisco.asa.asa_command:
+        commands:
+          - "show running-config ssh"
+      register: ssh_res
+
+    - name: Display SSH config
+      ansible.builtin.debug:
+        var: ssh_res.stdout_lines
