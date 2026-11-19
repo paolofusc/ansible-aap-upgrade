@@ -1,0 +1,27 @@
+---
+- name: Test SCP Server from AWX
+  hosts: localhost
+  gather_facts: false
+
+  tasks:
+    - name: Test TCP port 22 on 10.0.1.10
+      ansible.builtin.wait_for:
+        host: 10.0.1.10
+        port: 22
+        timeout: 5
+      register: port_22_res
+      ignore_errors: true
+
+    - name: Test TCP port 8080 on 10.0.1.10
+      ansible.builtin.wait_for:
+        host: 10.0.1.10
+        port: 8080
+        timeout: 5
+      register: port_8080_res
+      ignore_errors: true
+
+    - name: Display reachability from AWX pod to 10.0.1.10
+      ansible.builtin.debug:
+        msg:
+          - "Port 22 reachable: {{ port_22_res.failed is not defined or not port_22_res.failed }}"
+          - "Port 8080 reachable: {{ port_8080_res.failed is not defined or not port_8080_res.failed }}"
