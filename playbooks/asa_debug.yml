@@ -1,0 +1,20 @@
+---
+- name: Debug connectivity and SSH from Cisco ASA to SCP Server
+  hosts: asa_firewalls
+  gather_facts: false
+
+  tasks:
+    - name: Run network and SSH diagnostics on ASA
+      cisco.asa.asa_command:
+        commands:
+          - "ping management 10.0.1.10"
+          - "show arp"
+          - "show running-config interface Management0/0"
+          - "show running-config ssh"
+          - "ssh 10.0.1.10"
+      register: diag_output
+      ignore_errors: true
+
+    - name: Display diagnostics
+      ansible.builtin.debug:
+        var: diag_output.stdout_lines
