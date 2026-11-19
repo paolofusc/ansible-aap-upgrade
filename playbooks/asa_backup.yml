@@ -4,10 +4,10 @@
   gather_facts: false
 
   vars:
-    scp_server: "{{ scp_server | default('10.0.1.10') }}"
-    scp_user: "{{ scp_user | default('scp') }}"
-    scp_password: "{{ scp_password | default('scp1234567890') }}"
-    scp_dir: "{{ scp_dir | default('') }}"
+    target_scp_server: "{{ scp_server | default('10.0.1.10') }}"
+    target_scp_user: "{{ scp_user | default('scp') }}"
+    target_scp_password: "{{ scp_password | default('scp1234567890') }}"
+    target_scp_dir: "{{ scp_dir | default('') }}"
     perform_full_backup: true
     perform_config_backup: true
 
@@ -27,7 +27,7 @@
       when: perform_full_backup | bool
       cisco.asa.asa_command:
         commands:
-          - "backup /noconfirm location scp://{{ scp_user }}:{{ scp_password }}@{{ scp_server }}/{{ scp_dir }}{{ backup_archive_name }}"
+          - "backup /noconfirm location scp://{{ target_scp_user }}:{{ target_scp_password }}@{{ target_scp_server }}/{{ target_scp_dir }}{{ backup_archive_name }}"
       register: full_backup_result
       vars:
         ansible_command_timeout: 300
@@ -36,7 +36,7 @@
       when: perform_config_backup | bool
       cisco.asa.asa_command:
         commands:
-          - "copy /noconfirm running-config scp://{{ scp_user }}:{{ scp_password }}@{{ scp_server }}/{{ scp_dir }}{{ backup_config_name }}"
+          - "copy /noconfirm running-config scp://{{ target_scp_user }}:{{ target_scp_password }}@{{ target_scp_server }}/{{ target_scp_dir }}{{ backup_config_name }}"
       register: config_backup_result
       vars:
         ansible_command_timeout: 120
@@ -48,5 +48,5 @@
           - "Device: {{ inventory_hostname }} ({{ ansible_host }})"
           - "Full Archive: {{ backup_archive_name if perform_full_backup else 'Skipped' }}"
           - "Running Config: {{ backup_config_name if perform_config_backup else 'Skipped' }}"
-          - "Web GUI link: http://{{ scp_server }}:8080/files/{{ scp_dir }}"
+          - "Web GUI link: http://{{ target_scp_server }}:8080/files/{{ target_scp_dir }}"
           - "==================================================="
