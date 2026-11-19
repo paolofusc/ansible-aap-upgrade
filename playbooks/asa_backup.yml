@@ -1,0 +1,52 @@
+---
+- name: Backup Cisco ASA Configuration and Full System Archive to SCP Server
+  hosts: asa_firewalls
+  gather_facts: false
+
+  vars:
+    scp_server: "{{ scp_server | default('10.0.1.10') }}"
+    scp_user: "{{ scp_user | default('scp') }}"
+    scp_password: "{{ scp_password | default('scp1234567890') }}"
+    scp_dir: "{{ scp_dir | default('') }}"
+    perform_full_backup: true
+    perform_config_backup: true
+
+  tasks:
+    - name: Generate timestamp and filenames for backup
+      ansible.builtin.set_fact:
+        backup_ts: "{{ '%Y%m%d_%H%M%S' | strftime }}"
+        backup_archive_name: "{{ inventory_hostname }}_backup_{{ '%Y%m%d_%H%M%S' | strftime }}.tar.gz"
+        backup_config_name: "{{ inventory_hostname }}_running_{{ '%Y%m%d_%H%M%S' | strftime }}.cfg"
+
+    - name: Ensure SSH strict host key checking is disabled on ASA for SCP transfers
+      cisco.asa.asa_config:
+        lines:
+          - no ssh stricthostkeycheck
+
+    - name: Run Cisco ASA full system backup command to SCP server (.tar.gz)
+      when: perform_full_backup | bool
+      cisco.asa.asa_command:
+        commands:
+          - "backup /noconfirm location scp://{{ scp_user }}:{{ scp_password }}@{{ scp_server }}/{{ scp_dir }}{{ backup_archive_name }}"
+      register: full_backup_result
+      vars:
+        ansible_command_timeout: 300
+
+    - name: Run Cisco ASA running-config backup to SCP server (.cfg)
+      when: perform_config_backup | bool
+      cisco.asa.asa_command:
+        commands:
+          - "copy /noconfirm running-config scp://{{ scp_user }}:{{ scp_password }}@{{ scp_server }}/{{ scp_dir }}{{ backup_config_name }}"
+      register: config_backup_result
+      vars:
+        ansible_command_timeout: 120
+
+    - name: Display backup summary and FileBrowser links
+      ansible.builtin.debug:
+        msg:
+          - "================= BACKUP COMPLETE ================="
+          - "Device: {{ inventory_hostname }} ({{ ansible_host }})"
+          - "Full Archive: {{ backup_archive_name if perform_full_backup else 'Skipped' }}"
+          - "Running Config: {{ backup_config_name if perform_config_backup else 'Skipped' }}"
+          - "Web GUI link: http://{{ scp_server }}:8080/files/{{ scp_dir }}"
+          - "==================================================="
