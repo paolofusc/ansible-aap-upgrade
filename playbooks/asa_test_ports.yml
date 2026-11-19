@@ -1,0 +1,25 @@
+---
+- name: Test TCP ports on 10.0.1.10 from ASA
+  hosts: asa_firewalls
+  gather_facts: false
+
+  tasks:
+    - name: Test port 22 on 10.0.1.10
+      cisco.asa.asa_command:
+        commands:
+          - "telnet 10.0.1.10 22 /source-interface management"
+      register: telnet_22
+      ignore_errors: true
+
+    - name: Test port 8080 on 10.0.1.10
+      cisco.asa.asa_command:
+        commands:
+          - "telnet 10.0.1.10 8080 /source-interface management"
+      register: telnet_8080
+      ignore_errors: true
+
+    - name: Display results
+      ansible.builtin.debug:
+        msg:
+          - "Port 22: {{ telnet_22.stdout_lines | default(telnet_22.msg) }}"
+          - "Port 8080: {{ telnet_8080.stdout_lines | default(telnet_8080.msg) }}"
