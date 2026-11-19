@@ -9,6 +9,7 @@
     target_scp_password: "{{ scp_password | default('scp1234567890') }}"
     target_scp_dir: "{{ scp_dir | default('backups/') }}"
     asa_source_interface: "{{ asa_interface | default('management') }}"
+    target_backup_passphrase: "{{ backup_passphrase | default('Cisco1@3') }}"
     perform_full_backup: true
     perform_config_backup: true
 
@@ -28,7 +29,7 @@
       when: perform_full_backup | bool
       cisco.asa.asa_command:
         commands:
-          - "backup /noconfirm interface {{ asa_source_interface }} location scp://{{ target_scp_user }}:{{ target_scp_password }}@{{ target_scp_server }}/{{ target_scp_dir }}{{ backup_archive_name }}"
+          - "backup /noconfirm interface {{ asa_source_interface }} {{ ('passphrase ' ~ target_backup_passphrase ~ ' ') if target_backup_passphrase else '' }}location scp://{{ target_scp_user }}:{{ target_scp_password }}@{{ target_scp_server }}/{{ target_scp_dir }}{{ backup_archive_name }}"
       register: full_backup_result
       vars:
         ansible_command_timeout: 300
