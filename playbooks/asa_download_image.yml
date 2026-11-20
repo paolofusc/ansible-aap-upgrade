@@ -28,12 +28,12 @@
           - "{{ playbook_dir }}/../scripts/lookup_digest.py"
           - "{{ target_scp_server }}"
           - "{{ target_scp_user }}"
-          - "{{ target_scp_password }}"
           - "{{ target_digest_file }}"
           - "{{ asa_image | trim }}"
+      environment:
+        SCP_PASSWORD: "{{ target_scp_password }}"
       register: digest_lookup_raw
       changed_when: false
-      no_log: true
 
     - name: Parse expected digest and detect hash algorithm (SHA-512 or MD5)
       ansible.builtin.set_fact:

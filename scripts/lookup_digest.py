@@ -2,16 +2,18 @@
 """Fetch digest.csv from the SCP server via SFTP and look up the expected digest for an ASA image."""
 
 import json
+import os
 import sys
 import paramiko
 
 
 def main() -> None:
-    if len(sys.argv) != 6:
-        print(json.dumps({"error": "Usage: lookup_digest.py <host> <user> <password> <csv_path> <image_name>"}))
+    if len(sys.argv) < 5:
+        print(json.dumps({"error": "Usage: lookup_digest.py <host> <user> <csv_path> <image_name>"}))
         sys.exit(1)
 
-    host, user, password, csv_path, target_image = sys.argv[1:6]
+    host, user, csv_path, target_image = sys.argv[1:5]
+    password = os.environ.get("SCP_PASSWORD", "")
 
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -19,9 +21,15 @@ def main() -> None:
 
     try:
         sftp = client.open_sftp()
-        with sftp.open(csv_path, "r") as f:
-            content = f.read().decode("utf-8-sig")
-        sftp.close()
+        try:
+            with sftp.open(csv_path, "r") as f:
+                content = f.read().decode("utf-8-sig")
+        except FileNotFoundError:
+            root_files = sftp.listdir(".")
+            sys.stderr.write(f"File '{csv_path}' not found on {host}. Files in home dir: {root_files}\n")
+            sys.exit(2)
+        finally:
+            sftp.close()
     finally:
         client.close()
 
