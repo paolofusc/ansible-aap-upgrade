@@ -24,7 +24,7 @@
       run_once: true
       ansible.builtin.command:
         argv:
-          - python3
+          - "{{ ansible_playbook_python }}"
           - "{{ playbook_dir }}/../scripts/lookup_digest.py"
           - "{{ target_scp_server }}"
           - "{{ target_scp_user }}"
