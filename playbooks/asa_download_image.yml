@@ -93,7 +93,7 @@
       when: not image_already_verified
       cisco.asa.asa_command:
         commands:
-          - "copy /noconfirm scp://{{ target_scp_user }}:{{ target_scp_password }}@{{ target_scp_server }}/{{ target_scp_images_dir }}{{ asa_image }};int={{ asa_source_interface }} disk0:/{{ asa_image }}"
+          - "copy /noconfirm scp://{{ target_scp_user }}:{{ target_scp_password }}@{{ target_scp_server }}/{{ target_scp_images_dir }}{{ asa_image }} disk0:/{{ asa_image }}"
       register: copy_result
       vars:
         ansible_command_timeout: 900
