@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fetch digest.csv from the SCP server via SFTP and look up the expected digest for an ASA image."""
+"""Fetch digest CSV from the SCP server via SFTP and look up the expected digest for an ASA image."""
 
 import json
 import os
@@ -19,15 +19,33 @@ def main() -> None:
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     client.connect(host, username=user, password=password, timeout=15)
 
+    candidates = []
+    for p in (csv_path, "images/digest.csv", "images/digests.csv", "digest.csv", "digests.csv"):
+        if p and p not in candidates:
+            candidates.append(p)
+
+    content = None
+    used_path = None
     try:
         sftp = client.open_sftp()
         try:
-            with sftp.open(csv_path, "r") as f:
-                content = f.read().decode("utf-8-sig")
-        except FileNotFoundError:
-            root_files = sftp.listdir(".")
-            sys.stderr.write(f"File '{csv_path}' not found on {host}. Files in home dir: {root_files}\n")
-            sys.exit(2)
+            for path in candidates:
+                try:
+                    with sftp.open(path, "r") as f:
+                        content = f.read().decode("utf-8-sig")
+                        used_path = path
+                        break
+                except FileNotFoundError:
+                    continue
+
+            if content is None:
+                root_files = sftp.listdir(".")
+                img_files = sftp.listdir("images") if "images" in root_files else []
+                sys.stderr.write(
+                    f"Digest CSV not found (tried {candidates}). "
+                    f"Root files: {root_files} | images/ files: {img_files}\n"
+                )
+                sys.exit(2)
         finally:
             sftp.close()
     finally:
@@ -51,7 +69,7 @@ def main() -> None:
             found = parts[1].lower()
             break
 
-    print(json.dumps({"digest": found, "available": available}))
+    print(json.dumps({"digest": found, "available": available, "csv_path": used_path}))
 
 
 if __name__ == "__main__":
