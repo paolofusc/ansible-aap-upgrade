@@ -1,0 +1,130 @@
+---
+- name: Download Cisco ASA Image from SCP Server and Verify Digest
+  hosts: asa_firewalls
+  gather_facts: false
+
+  vars:
+    target_scp_server: "{{ scp_server | default('10.0.1.10') }}"
+    target_scp_user: "{{ scp_user | default('scp') }}"
+    target_scp_password: "{{ scp_password | default('scp1234567890') }}"
+    target_scp_images_dir: "{{ scp_images_dir | default('images/') }}"
+    target_digest_file: "{{ scp_digest_file | default('digest.csv') }}"
+    asa_source_interface: "{{ asa_interface | default('management') }}"
+
+  tasks:
+    - name: Validate that asa_image variable was provided
+      ansible.builtin.assert:
+        that:
+          - asa_image is defined
+          - asa_image | trim | length > 0
+        fail_msg: "Please provide 'asa_image' (e.g. via AWX Survey or Extra Vars)."
+
+    - name: Fetch {{ target_digest_file }} from SCP server and look up expected digest for {{ asa_image }}
+      delegate_to: localhost
+      run_once: true
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ playbook_dir }}/../scripts/lookup_digest.py"
+          - "{{ target_scp_server }}"
+          - "{{ target_scp_user }}"
+          - "{{ target_scp_password }}"
+          - "{{ target_digest_file }}"
+          - "{{ asa_image | trim }}"
+      register: digest_lookup_raw
+      changed_when: false
+      no_log: true
+
+    - name: Parse expected digest and detect hash algorithm (SHA-512 or MD5)
+      ansible.builtin.set_fact:
+        digest_lookup: "{{ digest_lookup_raw.stdout | from_json }}"
+
+    - name: Ensure requested image exists in {{ target_digest_file }}
+      ansible.builtin.assert:
+        that:
+          - digest_lookup.digest is not none
+          - digest_lookup.digest | length in [32, 128]
+        fail_msg: >-
+          Image '{{ asa_image }}' not found in '{{ target_digest_file }}' (or digest length is not 32-char MD5 / 128-char SHA-512).
+          Available entries in {{ target_digest_file }}: {{ digest_lookup.available }}
+
+    - name: Set expected digest and ASA verify algorithm
+      ansible.builtin.set_fact:
+        expected_digest: "{{ digest_lookup.digest }}"
+        verify_algo: "{{ 'sha-512' if (digest_lookup.digest | length == 128) else 'md5' }}"
+
+    - name: Check if {{ asa_image }} already exists on ASA disk0:/
+      cisco.asa.asa_command:
+        commands:
+          - "dir disk0:/{{ asa_image }}"
+      register: dir_check
+      ignore_errors: true
+
+    - name: Verify existing image on disk0:/ (if already present)
+      when:
+        - not dir_check.failed
+        - "'No such file' not in (dir_check.stdout[0] | default(''))"
+        - "'Error' not in (dir_check.stdout[0] | default(''))"
+      cisco.asa.asa_command:
+        commands:
+          - "verify /{{ verify_algo }} disk0:/{{ asa_image }}"
+      register: pre_verify
+      ignore_errors: true
+      vars:
+        ansible_command_timeout: 300
+
+    - name: Determine whether image download is needed
+      ansible.builtin.set_fact:
+        image_already_verified: >-
+          {{
+            (pre_verify is defined)
+            and (not (pre_verify.skipped | default(false)))
+            and (not (pre_verify.failed | default(true)))
+            and (expected_digest in (pre_verify.stdout[0] | default('') | lower))
+          }}
+
+    - name: Ensure SSH strict host key checking is disabled on ASA for SCP transfers
+      when: not image_already_verified
+      cisco.asa.asa_config:
+        lines:
+          - no ssh stricthostkeycheck
+
+    - name: Download {{ asa_image }} from SCP server to ASA disk0:/
+      when: not image_already_verified
+      cisco.asa.asa_command:
+        commands:
+          - "copy /noconfirm scp://{{ target_scp_user }}:{{ target_scp_password }}@{{ target_scp_server }}/{{ target_scp_images_dir }}{{ asa_image }};int={{ asa_source_interface }} disk0:/{{ asa_image }}"
+      register: copy_result
+      vars:
+        ansible_command_timeout: 900
+
+    - name: Verify {{ verify_algo | upper }} digest of downloaded image on ASA disk0:/
+      when: not image_already_verified
+      cisco.asa.asa_command:
+        commands:
+          - "verify /{{ verify_algo }} disk0:/{{ asa_image }}"
+      register: post_verify
+      vars:
+        ansible_command_timeout: 300
+
+    - name: Assert downloaded image digest matches {{ target_digest_file }}
+      when: not image_already_verified
+      ansible.builtin.assert:
+        that:
+          - expected_digest in (post_verify.stdout[0] | default('') | lower)
+        fail_msg: >-
+          DIGEST MISMATCH for disk0:/{{ asa_image }}!
+          Expected ({{ verify_algo }}): {{ expected_digest }}
+          ASA verify output: {{ post_verify.stdout[0] | default('No output') }}
+        success_msg: "Verified {{ verify_algo | upper }} digest for disk0:/{{ asa_image }} matches {{ target_digest_file }}!"
+
+    - name: Display image download and verification summary
+      ansible.builtin.debug:
+        msg:
+          - "============== IMAGE VERIFIED =============="
+          - "Device: {{ inventory_hostname }} ({{ ansible_host }})"
+          - "Image: disk0:/{{ asa_image }}"
+          - "Status: {{ 'Already present & verified (download skipped)' if image_already_verified else 'Downloaded & verified' }}"
+          - "Algorithm: {{ verify_algo | upper }}"
+          - "Digest: {{ expected_digest }}"
+          - "============================================"
