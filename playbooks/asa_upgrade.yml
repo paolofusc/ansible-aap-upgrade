@@ -1,0 +1,142 @@
+---
+- name: Upgrade Cisco ASA using Image in disk0:/
+  hosts: asa_firewalls
+  gather_facts: false
+
+  vars:
+    reload_device: true
+    keep_fallback_boot: true
+    reload_wait_timeout: 600
+
+  tasks:
+    - name: Validate that asa_image variable was provided
+      ansible.builtin.assert:
+        that:
+          - asa_image is defined
+          - asa_image | trim | length > 0
+        fail_msg: "Please provide 'asa_image' (e.g. via AWX Survey or Extra Vars)."
+
+    - name: Gather pre-upgrade version, boot config, and verify image exists on disk0:/
+      cisco.asa.asa_command:
+        commands:
+          - "show version"
+          - "show running-config boot"
+          - "dir disk0:/{{ asa_image | trim }}"
+      register: pre_check
+
+    - name: Ensure disk0:/{{ asa_image | trim }} exists on the ASA
+      ansible.builtin.assert:
+        that:
+          - "'No such file' not in (pre_check.stdout[2] | default(''))"
+          - "'Error' not in (pre_check.stdout[2] | default(''))"
+          - "(asa_image | trim) in (pre_check.stdout[2] | default(''))"
+        fail_msg: >-
+          Image 'disk0:/{{ asa_image | trim }}' was not found on {{ inventory_hostname }}!
+          Run 'ASA Download & Verify Image' first.
+
+    - name: Parse pre-upgrade version and existing boot system entries
+      ansible.builtin.set_fact:
+        pre_version: >-
+          {{ (pre_check.stdout[0] | regex_search('Cisco Adaptive Security Appliance Software Version\s+([^\r\n]+)', '\1') | default(['Unknown'], true)) | first }}
+        pre_system_image: >-
+          {{ (pre_check.stdout[0] | regex_search('System image file is "([^"]+)"', '\1') | default(['Unknown'], true)) | first }}
+        existing_boot_lines: >-
+          {{ pre_check.stdout_lines[1] | select('match', '^boot system\s+') | list }}
+
+    - name: Determine primary fallback boot entry (if any)
+      ansible.builtin.set_fact:
+        fallback_boot_line: >-
+          {{
+            (existing_boot_lines | first)
+            if (keep_fallback_boot | bool and existing_boot_lines | length > 0 and ('disk0:/' ~ (asa_image | trim)) not in (existing_boot_lines | first))
+            else ''
+          }}
+
+    - name: Display pre-upgrade state
+      ansible.builtin.debug:
+        msg:
+          - "Current Version: {{ pre_version }}"
+          - "Current Running Image: {{ pre_system_image }}"
+          - "Existing boot lines: {{ existing_boot_lines }}"
+          - "Target Primary Boot: boot system disk0:/{{ asa_image | trim }}"
+          - "Fallback Boot: {{ fallback_boot_line if fallback_boot_line else 'None' }}"
+
+    - name: Remove existing boot system entries before setting new boot order
+      when: existing_boot_lines | length > 0
+      cisco.asa.asa_config:
+        lines: "{{ existing_boot_lines | map('regex_replace', '^', 'no ') | list }}"
+
+    - name: Configure new primary boot system image (and fallback if present)
+      cisco.asa.asa_config:
+        lines: >-
+          {{
+            ['boot system disk0:/' ~ (asa_image | trim)]
+            + ([fallback_boot_line] if fallback_boot_line else [])
+          }}
+
+    - name: Save configuration to startup-config (write memory)
+      cisco.asa.asa_command:
+        commands:
+          - "write memory"
+          - "show bootvar"
+      register: save_boot_result
+
+    - name: Display configured boot variables
+      ansible.builtin.debug:
+        var: save_boot_result.stdout_lines[1]
+
+    - name: Reload ASA to apply upgrade
+      when: reload_device | bool
+      block:
+        - name: Issue reload noconfirm on ASA
+          cisco.asa.asa_command:
+            commands:
+              - "reload noconfirm"
+          ignore_errors: true
+          vars:
+            ansible_command_timeout: 30
+
+        - name: Reset persistent SSH connection after reload
+          ansible.builtin.meta: reset_connection
+
+        - name: Wait 20 seconds for ASA shutdown to begin
+          ansible.builtin.pause:
+            seconds: 20
+
+        - name: Wait for ASA SSH port 22 to come back online
+          delegate_to: localhost
+          ansible.builtin.wait_for:
+            host: "{{ ansible_host }}"
+            port: 22
+            delay: 15
+            timeout: "{{ reload_wait_timeout }}"
+            state: started
+
+        - name: Allow ASA SSH/AAA services 15 seconds to finish initializing
+          ansible.builtin.pause:
+            seconds: 15
+
+        - name: Gather post-upgrade version and boot status
+          cisco.asa.asa_command:
+            commands:
+              - "show version"
+              - "show bootvar"
+          register: post_check
+
+        - name: Parse post-upgrade version and active system image
+          ansible.builtin.set_fact:
+            post_version: >-
+              {{ (post_check.stdout[0] | regex_search('Cisco Adaptive Security Appliance Software Version\s+([^\r\n]+)', '\1') | default(['Unknown'], true)) | first }}
+            post_system_image: >-
+              {{ (post_check.stdout[0] | regex_search('System image file is "([^"]+)"', '\1') | default(['Unknown'], true)) | first }}
+
+        - name: Display upgrade summary (Before vs. After)
+          ansible.builtin.debug:
+            msg:
+              - "================ UPGRADE SUMMARY ================"
+              - "Device:         {{ inventory_hostname }} ({{ ansible_host }})"
+              - "Before Version: {{ pre_version }} ({{ pre_system_image }})"
+              - "After Version:  {{ post_version }} ({{ post_system_image }})"
+              - "Target Image:   disk0:/{{ asa_image | trim }}"
+              - "Booted Target:  {{ 'YES' if (asa_image | trim) in post_system_image else 'NO (check console / ASAv image compatibility)' }}"
+              - "================================================="
